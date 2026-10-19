@@ -18,10 +18,10 @@ import type { SubprocessCollect, SubprocessHandle, SubprocessOutputReader, Subpr
 import { clampTimeout, deadline, MAX_TIMER_DELAY_MS, timeoutOf } from '@deepseek-ai/dsh-timeout'
 
 /**
- * Model-friendly environment overrides: disable colors, pagers, and
- * interactive terminal features that would garble tool output (the same set
- * Codex hardcodes; Claude Code achieves it via TERM=dumb). Bash-tool policy —
- * merged first into the spawn's explicit env, so a trusted caller's own entry
+ * Model-friendly environment overrides: disable colors and pagers that garble
+ * output, and disable every interactive git credential path — terminal prompt
+ * or askpass — that would block a non-interactive tool shell. Bash-tool policy
+ * — merged first into the spawn's explicit env, so a trusted caller's own entry
  * still wins; the subprocess service applies its credential scrub independently.
  */
 export const ENV_OVERRIDES = {
@@ -29,6 +29,8 @@ export const ENV_OVERRIDES = {
   TERM: 'dumb',
   PAGER: 'cat',
   GIT_PAGER: 'cat',
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_ASKPASS: '',
 } as const
 
 /** Default SIGTERM→SIGKILL grace period (the `graceMs` config; matches OpenCode's 3s). */

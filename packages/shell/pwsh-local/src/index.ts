@@ -28,13 +28,17 @@ import { resolvePwshPath } from './resolve.ts'
 /* jscpd:ignore-start -- deliberate call-for-call mirror of dsh-bash-local (Agent Note: pwsh-tool-and-executor). */
 /**
  * Model-friendly environment overrides for PowerShell: disable colors and
- * pagers that would garble tool output. `TERM=dumb` is a POSIX concept and is
+ * pagers that would garble tool output, and disable every interactive git
+ * credential path — terminal prompt or askpass — that would block a
+ * non-interactive tool shell. `TERM=dumb` is a POSIX concept and is
  * deliberately absent; `NO_COLOR` is honored by modern pwsh renderers.
  */
 export const ENV_OVERRIDES = {
   NO_COLOR: '1',
   PAGER: 'cat',
   GIT_PAGER: 'cat',
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_ASKPASS: '',
 } as const
 
 /**

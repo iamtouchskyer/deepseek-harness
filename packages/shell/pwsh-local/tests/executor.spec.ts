@@ -241,6 +241,7 @@ describe('spawn construction (pure, every platform)', () => {
     expect(argv[5]).toBe(`${ENCODING_PREAMBLE}Write-Output 你好`)
     expect(ENCODING_PREAMBLE).toContain('[Console]::OutputEncoding')
     expect(ENCODING_PREAMBLE).toContain('$OutputEncoding')
+    expect(subprocess.specs[0]!.env).toMatchObject({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '' })
   })
 
   it('reports both unread stderr and an asynchronous provider rejection exactly once', async () => {
@@ -441,6 +442,14 @@ describe.skipIf(!hasPwsh)('PwshLocalExecutor.run', () => {
     expect(result.exitCode).toBe(0)
     expect(lf(result.stdout.text)).toBe('hi\n')
     expect(result.timeoutMs).toBe(10_000)
+  })
+
+  it('stamps the non-interactive git environment on the child', { timeout: 15_000 }, async () => {
+    const { bash } = await setup()
+    const result = await run(bash, bash.resolve({
+      command: "[Environment]::GetEnvironmentVariable('GIT_TERMINAL_PROMPT')",
+    }))
+    expect(lf(result.stdout.text)).toBe('0\n')
   })
 
   it('uses config cwd, overridable per call', async () => {

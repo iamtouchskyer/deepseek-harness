@@ -52,7 +52,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Running commands
 
-Run a command by awaiting the execution's `result()` projection. A nonzero exit, a timeout, or a cancellation resolves with a descriptive result — only infrastructure failures reject. Per-call `timeoutMs` overrides are capped by the configuration, while `workdir` falls back to the configured default when unset; a trusted caller can also raise the per-call stdout capture budget, while stderr keeps `maxOutputBytes`. The environment is model-friendly by default: `NO_COLOR=1 TERM=dumb PAGER=cat GIT_PAGER=cat` keep pagers and ANSI colors from garbling output, and an explicit caller-provided entry still wins.
+Run a command by awaiting the execution's `result()` projection. A nonzero exit, a timeout, or a cancellation resolves with a descriptive result — only infrastructure failures reject. Per-call `timeoutMs` overrides are capped by the configuration, while `workdir` falls back to the configured default when unset; a trusted caller can also raise the per-call stdout capture budget, while stderr keeps `maxOutputBytes`. The environment is model-friendly by default: `NO_COLOR=1 TERM=dumb PAGER=cat GIT_PAGER=cat` keep pagers and ANSI colors from garbling output, while `GIT_TERMINAL_PROMPT=0` and an empty `GIT_ASKPASS` make git's own credential prompts fail fast instead of blocking on an interactive or GUI prompt; an explicit caller-provided entry still wins.
 
 ```text
 const execution = await ctx.shell.execute(ctx.shell.resolve({ command: 'ls -la' }))

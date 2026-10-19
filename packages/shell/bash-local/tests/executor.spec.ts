@@ -1,5 +1,6 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { devNull, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -9,6 +10,9 @@ import SubprocessRuntime from '@deepseek-ai/dsh-subprocess'
 import type { SubprocessHandle, SubprocessOutcome, SubprocessOutputReader } from '@deepseek-ai/dsh-subprocess'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import type { ShellExecSpec, ShellExecution, ShellProcess, ShellRunResult } from '@deepseek-ai/dsh-shell'
+
+/** `git` is only needed for the credential-path tests; other hosts skip them. */
+const hasGit = spawnSync('git', ['--version'], { stdio: 'ignore' }).status === 0
 
 /** Historical foreground shorthand over the unified execute() seam. */
 async function run(x: { execute(spec: ShellExecSpec): Promise<ShellExecution> }, spec: ShellExecSpec): Promise<ShellRunResult> {
@@ -60,6 +64,42 @@ describe('LocalBashExecutor.run', () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout.text).toBe('hi\n')
     expect(result.timeoutMs).toBe(5_000)
+  })
+
+  it('disables interactive git credential prompts in the tool shell', async () => {
+    const { bash } = await setup()
+    const result = await run(bash, bash.resolve({ command: 'printf %s "${GIT_TERMINAL_PROMPT:-unset}"' }))
+    expect(result.stdout.text).toBe('0')
+  })
+
+  it('lets a trusted caller override the git prompt policy', async () => {
+    const { bash } = await setup()
+    const result = await run(bash, bash.resolve({
+      command: 'printf %s "${GIT_TERMINAL_PROMPT:-unset}"',
+      env: { GIT_TERMINAL_PROMPT: '1' },
+    }))
+    expect(result.stdout.text).toBe('1')
+  })
+
+  it.skipIf(!hasGit)('keeps askpass out of git credential prompts in the tool shell', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-bash-askpass-'))
+    const marker = join(dir, 'prompted')
+    const askpass = join(dir, 'askpass.sh')
+    writeFileSync(askpass, `#!/bin/sh\necho prompted >> "${marker.replaceAll('\\', '/')}"\necho secret\n`, { mode: 0o700 })
+    const { bash } = await setup()
+    vi.stubEnv('GIT_ASKPASS', askpass)
+    try {
+      const result = await run(bash, bash.resolve({
+        command: "printf 'protocol=https\\nhost=example.com\\n' | git -c credential.helper= credential fill",
+        env: { GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull },
+      }))
+      expect(result.exitCode).not.toBe(0)
+      expect(result.stderr.text).toContain('terminal prompts disabled')
+      expect(existsSync(marker)).toBe(false)
+    } finally {
+      vi.unstubAllEnvs()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('uses config cwd, overridable per call', async () => {
