@@ -52,7 +52,7 @@ kind: "package-reference"
 
 ### 运行命令
 
-通过等待 execution 的 `result()` 投影来运行命令。非零退出、超时或取消都会 resolve 为描述性结果——只有基础设施失败才 reject。每次调用的 `timeoutMs` 覆盖值受配置上限约束，`workdir` 未设置时则回退到配置的默认值；受信任的调用方还可以为单次调用提高 stdout 捕获预算，而 stderr 仍使用 `maxOutputBytes`。环境默认面向模型：`NO_COLOR=1 TERM=dumb PAGER=cat GIT_PAGER=cat` 可防止分页器与 ANSI 颜色破坏输出，其中 `GIT_TERMINAL_PROMPT=0` 与空 `GIT_ASKPASS` 让 git 自身的凭据提示直接失败而不是阻塞在交互式或图形提示上，调用方显式提供的条目仍然优先。
+通过等待 execution 的 `result()` 投影来运行命令。非零退出、超时或取消都会 resolve 为描述性结果——只有基础设施失败才 reject。每次调用的 `timeoutMs` 覆盖值受配置上限约束，`workdir` 未设置时则回退到配置的默认值；受信任的调用方还可以为单次调用提高 stdout 捕获预算，而 stderr 仍使用 `maxOutputBytes`。环境默认面向模型：`NO_COLOR=1 TERM=dumb PAGER=cat GIT_PAGER=cat` 可防止分页器与 ANSI 颜色破坏输出，其中 `GIT_TERMINAL_PROMPT=0`、空 `GIT_ASKPASS`、空 `SSH_ASKPASS`、`SSH_ASKPASS_REQUIRE=never` 与 `LC_ALL=C` 让 git 自身的凭据提示直接失败而不是阻塞在交互式或图形提示上，调用方显式提供的条目仍然优先。
 
 ```text
 const execution = await ctx.shell.execute(ctx.shell.resolve({ command: 'ls -la' }))

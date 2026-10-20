@@ -4,7 +4,7 @@ import { devNull, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
+import { ENV_OVERRIDES, LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import SubprocessRuntime from '@deepseek-ai/dsh-subprocess'
 import type { SubprocessHandle, SubprocessOutcome, SubprocessOutputReader } from '@deepseek-ai/dsh-subprocess'
@@ -66,19 +66,27 @@ describe('LocalBashExecutor.run', () => {
     expect(result.timeoutMs).toBe(5_000)
   })
 
-  it('disables interactive git credential prompts in the tool shell', async () => {
+  it('stamps every non-interactive git prompt guard in the tool shell', async () => {
+    expect(ENV_OVERRIDES).toMatchObject({
+      GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '',
+      SSH_ASKPASS_REQUIRE: 'never', LC_ALL: 'C',
+    })
     const { bash } = await setup()
     const result = await run(bash, bash.resolve({ command: 'printf %s "${GIT_TERMINAL_PROMPT:-unset}"' }))
     expect(result.stdout.text).toBe('0')
   })
 
-  it('lets a trusted caller override the git prompt policy', async () => {
+  it('lets a trusted caller override every git prompt guard', async () => {
     const { bash } = await setup()
     const result = await run(bash, bash.resolve({
-      command: 'printf %s "${GIT_TERMINAL_PROMPT:-unset}"',
-      env: { GIT_TERMINAL_PROMPT: '1' },
+      command: 'printf "%s|%s|%s|%s|%s" "${GIT_TERMINAL_PROMPT:-unset}" "${GIT_ASKPASS-unset}" "${SSH_ASKPASS-unset}" "${SSH_ASKPASS_REQUIRE:-unset}" "${LC_ALL:-unset}"',
+      env: {
+        GIT_TERMINAL_PROMPT: '1', GIT_ASKPASS: 'custom-git-askpass',
+        SSH_ASKPASS: 'custom-ssh-askpass', SSH_ASKPASS_REQUIRE: 'force',
+        LC_ALL: 'en_US.UTF-8',
+      },
     }))
-    expect(result.stdout.text).toBe('1')
+    expect(result.stdout.text).toBe('1|custom-git-askpass|custom-ssh-askpass|force|en_US.UTF-8')
   })
 
   it.skipIf(!hasGit)('keeps askpass out of git credential prompts in the tool shell', async () => {

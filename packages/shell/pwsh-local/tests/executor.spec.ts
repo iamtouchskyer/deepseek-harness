@@ -241,7 +241,10 @@ describe('spawn construction (pure, every platform)', () => {
     expect(argv[5]).toBe(`${ENCODING_PREAMBLE}Write-Output 你好`)
     expect(ENCODING_PREAMBLE).toContain('[Console]::OutputEncoding')
     expect(ENCODING_PREAMBLE).toContain('$OutputEncoding')
-    expect(subprocess.specs[0]!.env).toMatchObject({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '' })
+    expect(subprocess.specs[0]!.env).toMatchObject({
+      GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '',
+      SSH_ASKPASS_REQUIRE: 'never', LC_ALL: 'C',
+    })
   })
 
   it('reports both unread stderr and an asynchronous provider rejection exactly once', async () => {

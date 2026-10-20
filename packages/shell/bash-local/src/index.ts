@@ -31,6 +31,9 @@ export const ENV_OVERRIDES = {
   GIT_PAGER: 'cat',
   GIT_TERMINAL_PROMPT: '0',
   GIT_ASKPASS: '',
+  SSH_ASKPASS: '',
+  SSH_ASKPASS_REQUIRE: 'never',
+  LC_ALL: 'C',
 } as const
 
 /** Default SIGTERM→SIGKILL grace period (the `graceMs` config; matches OpenCode's 3s). */
