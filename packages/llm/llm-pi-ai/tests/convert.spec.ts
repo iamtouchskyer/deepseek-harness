@@ -574,6 +574,38 @@ describe('toPiContext', () => {
     expect(onDegrade).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['a content discriminant', '{"type":"output_text","text":"x"}'],
+    ['a blank discriminant', '{"type":"   "}'],
+    ['no discriminant', '{"role":"assistant","content":[]}'],
+  ])('drops a Responses reasoning signature carrying %s', (_label, signature) => {
+    const onDegrade = vi.fn()
+    const context = toPiContext({
+      provider: 'openai',
+      model: 'gpt-5',
+      messages: [createMessage({
+        role: 'assistant',
+        content: [{ type: 'reasoning', text: 'kept reasoning' }],
+        source: {
+          kind: 'model',
+          ...{
+            provider: 'openai',
+            model: 'gpt-5',
+            replayState: {
+              response: {
+                kind: 'pi-ai', version: 2, api: 'openai-responses', provider: 'openai',
+                model: 'gpt-5', stopReason: 'stop',
+              },
+              blocks: [{ type: 'reasoning', thinkingSignature: signature }],
+            },
+          },
+        },
+      })],
+    }, undefined, onDegrade)
+    expect((context.messages[0] as AssistantMessage).content[0]).not.toHaveProperty('thinkingSignature')
+    expect(onDegrade).toHaveBeenCalledWith(expect.stringContaining('not a replayable input item'))
+  })
+
   it('degrades unsupported replay-state versions to provider-neutral history', () => {
     const onDegrade = vi.fn()
     const context = toPiContext({

@@ -184,11 +184,30 @@ function foreignAssistant(message: HarnessAssistantMessage): AssistantMessage {
 }
 
 /**
+ * Input item discriminants a Responses request may carry in history.
+ *
+ * Sourced from the OpenAI SDK's `ResponseInputItem` union; a signature whose
+ * `type` is outside this set is not an input item the wire schema accepts.
+ */
+const RESPONSES_INPUT_ITEM_TYPES: ReadonlySet<string> = new Set([
+  'message', 'reasoning', 'function_call', 'function_call_output',
+  'custom_tool_call', 'custom_tool_call_output',
+  'computer_call', 'computer_call_output',
+  'file_search_call', 'web_search_call', 'tool_search_call', 'tool_search_output',
+  'code_interpreter_call', 'image_generation_call',
+  'local_shell_call', 'local_shell_call_output',
+  'shell_call', 'shell_call_output', 'apply_patch_call', 'apply_patch_call_output',
+  'mcp_list_tools', 'mcp_approval_request', 'mcp_approval_response', 'mcp_call',
+  'additional_tools', 'configuration_update', 'compaction', 'compaction_trigger',
+  'item_reference', 'program', 'program_output',
+])
+
+/**
  * Whether a durable reasoning signature may be replayed to this API.
  *
  * The Responses APIs treat `thinkingSignature` as a complete input item that
  * pi-ai parses and forwards verbatim, so a signature that is not a JSON object
- * carrying a non-empty string `type` becomes an item the provider rejects — one
+ * carrying an accepted discriminant becomes an item the provider rejects — one
  * poisoned row would fail every later request for the session. Other APIs read
  * the signature as an opaque token of their own.
  * @param api - the API recorded in the replay envelope.
@@ -207,15 +226,17 @@ function isReplayableReasoningSignature(api: string, signature: string): boolean
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false
   const type: unknown = (parsed as Record<string, unknown>)['type']
-  return typeof type === 'string' && type.length > 0
+  return typeof type === 'string' && RESPONSES_INPUT_ITEM_TYPES.has(type)
 }
 
 /**
  * Recombine durable Harness content with validated pi-ai replay metadata.
  *
- * A reasoning signature the target Responses API cannot represent is dropped —
- * the reasoning text and every other block still replay — and reported through
- * `onDegrade` so the loss is observable rather than silent.
+ * A reasoning signature the target Responses API cannot represent is dropped so
+ * the request still goes out; every other block replays unchanged. The reasoning
+ * text stays in the Harness context but is not sent, because the Responses
+ * serializer emits a reasoning item only from a signature. The drop is reported
+ * through `onDegrade` so it is observable rather than silent.
  * @param message - durable assistant message whose blocks carry the content.
  * @param source - the model source holding the replay envelope.
  * @param rawState - the unvalidated replay envelope.
@@ -245,7 +266,7 @@ function replayedAssistant(
         const signature = replay.type === 'reasoning' ? replay.thinkingSignature : undefined
         const replayable = signature !== undefined && isReplayableReasoningSignature(state.response.api, signature)
         if (signature !== undefined && !replayable) {
-          onDegrade?.(`${state.response.api} reasoning signature for block ${index} is not a replayable input item; reasoning text replayed without it`)
+          onDegrade?.(`${state.response.api} reasoning signature for block ${index} is not a replayable input item; dropping the signature keeps the request valid`)
         }
         return {
           type: 'thinking',
