@@ -183,8 +183,51 @@ function foreignAssistant(message: HarnessAssistantMessage): AssistantMessage {
   }
 }
 
-/** Recombine durable Harness content with validated pi-ai replay metadata. */
-function replayedAssistant(message: HarnessAssistantMessage, source: ModelMessageSource, rawState: unknown): AssistantMessage {
+/**
+ * Whether a durable reasoning signature may be replayed to this API.
+ *
+ * The Responses APIs treat `thinkingSignature` as a complete input item that
+ * pi-ai parses and forwards verbatim, so a signature that is not a JSON object
+ * carrying a non-empty string `type` becomes an item the provider rejects — one
+ * poisoned row would fail every later request for the session. Other APIs read
+ * the signature as an opaque token of their own.
+ * @param api - the API recorded in the replay envelope.
+ * @param signature - the stored reasoning signature.
+ * @returns whether the signature is safe to hand to pi-ai for this API.
+ */
+function isReplayableReasoningSignature(api: string, signature: string): boolean {
+  if (api !== 'openai-responses' && api !== 'azure-openai-responses' && api !== 'openai-codex-responses') return true
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(signature)
+  } catch {
+    // A non-JSON signature is exactly the unrepresentable case the Responses
+    // serializers forward as a bare item.
+    return false
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false
+  const type: unknown = (parsed as Record<string, unknown>)['type']
+  return typeof type === 'string' && type.length > 0
+}
+
+/**
+ * Recombine durable Harness content with validated pi-ai replay metadata.
+ *
+ * A reasoning signature the target Responses API cannot represent is dropped —
+ * the reasoning text and every other block still replay — and reported through
+ * `onDegrade` so the loss is observable rather than silent.
+ * @param message - durable assistant message whose blocks carry the content.
+ * @param source - the model source holding the replay envelope.
+ * @param rawState - the unvalidated replay envelope.
+ * @param onDegrade - receives one reason per dropped signature.
+ * @returns the reconstructed native assistant message.
+ */
+function replayedAssistant(
+  message: HarnessAssistantMessage,
+  source: ModelMessageSource,
+  rawState: unknown,
+  onDegrade?: (reason: string) => void,
+): AssistantMessage {
   const state = readReplayState(rawState)
   if (state.response.provider !== source.provider) return invalidReplay('provider does not match assistant source')
   if (state.response.model !== source.model) return invalidReplay('model does not match assistant source')
@@ -198,11 +241,18 @@ function replayedAssistant(message: HarnessAssistantMessage, source: ModelMessag
         text: block.text,
         ...replay.type === 'text' && replay.textSignature !== undefined ? { textSignature: replay.textSignature } : {},
       }
-      case 'reasoning': return {
-        type: 'thinking',
-        thinking: block.text,
-        ...replay.type === 'reasoning' && replay.thinkingSignature !== undefined ? { thinkingSignature: replay.thinkingSignature } : {},
-        ...replay.type === 'reasoning' && replay.redacted !== undefined ? { redacted: replay.redacted } : {},
+      case 'reasoning': {
+        const signature = replay.type === 'reasoning' ? replay.thinkingSignature : undefined
+        const replayable = signature !== undefined && isReplayableReasoningSignature(state.response.api, signature)
+        if (signature !== undefined && !replayable) {
+          onDegrade?.(`${state.response.api} reasoning signature for block ${index} is not a replayable input item; reasoning text replayed without it`)
+        }
+        return {
+          type: 'thinking',
+          thinking: block.text,
+          ...replayable ? { thinkingSignature: signature } : {},
+          ...replay.type === 'reasoning' && replay.redacted !== undefined ? { redacted: replay.redacted } : {},
+        }
       }
       case 'tool-call': return {
         type: 'toolCall',
@@ -248,7 +298,7 @@ export function toPiAssistant(message: HarnessAssistantMessage, onDegrade?: (rea
   const source = message.source
   if (source.replayState === undefined) return foreignAssistant(message)
   try {
-    return replayedAssistant(message, source, source.replayState)
+    return replayedAssistant(message, source, source.replayState, onDegrade)
   } catch (error: unknown) {
     /* v8 ignore next -- replayedAssistant throws only INVALID_REPLAY_STATE LlmErrors; the
        guard keeps a future non-replay failure loud instead of silently degrading it */

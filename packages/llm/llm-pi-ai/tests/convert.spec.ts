@@ -365,7 +365,7 @@ describe('toPiContext', () => {
       responseId: 'resp_123',
       stopReason: 'toolUse',
       content: [
-        { type: 'thinking', thinking: 'private reasoning', thinkingSignature: 'think-sig', redacted: true },
+        { type: 'thinking', thinking: 'private reasoning', thinkingSignature: '{"type":"reasoning","id":"rs_think"}', redacted: true },
         { type: 'text', text: 'calling', textSignature: 'text-sig' },
         { type: 'toolCall', id: 'c1', name: 'f', arguments: { a: 1 }, thoughtSignature: 'tool-sig', namespace: 'functions' },
       ],
@@ -396,7 +396,7 @@ describe('toPiContext', () => {
       responseId: 'resp_123',
       stopReason: 'toolUse',
       content: [
-        { type: 'thinking', thinking: 'private reasoning', thinkingSignature: 'think-sig', redacted: true },
+        { type: 'thinking', thinking: 'private reasoning', thinkingSignature: '{"type":"reasoning","id":"rs_think"}', redacted: true },
         { type: 'text', text: 'calling', textSignature: 'text-sig' },
         { type: 'toolCall', id: 'c1', name: 'f', arguments: { a: 1 }, thoughtSignature: 'tool-sig', namespace: 'functions' },
       ],
@@ -506,6 +506,72 @@ describe('toPiContext', () => {
     expect(context.messages[0]).not.toHaveProperty('responseId')
     expect(state.response).not.toHaveProperty('providerThinkingLevel')
     expect(context.messages[0]).not.toHaveProperty('providerThinkingLevel')
+  })
+
+  it('drops a Responses reasoning signature that is not a replayable input item', () => {
+    const onDegrade = vi.fn()
+    const context = toPiContext({
+      provider: 'openai',
+      model: 'gpt-5',
+      messages: [createMessage({
+        role: 'assistant',
+        content: [{ type: 'reasoning', text: 'kept reasoning' }],
+        source: {
+          kind: 'model',
+          ...{
+            provider: 'openai',
+            model: 'gpt-5',
+            replayState: {
+              response: {
+                kind: 'pi-ai', version: 2, api: 'openai-responses', provider: 'openai',
+                model: 'gpt-5', stopReason: 'stop',
+              },
+              // A role/content object without a discriminant is exactly the item
+              // a narrow Responses gateway rejects with a schema 400.
+              blocks: [{ type: 'reasoning', thinkingSignature: '{"role":"assistant","content":[{"type":"output_text","text":"x"}]}' }],
+            },
+          },
+        },
+      })],
+    }, undefined, onDegrade)
+    expect(context.messages[0]).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking: 'kept reasoning' }],
+    })
+    expect((context.messages[0] as AssistantMessage).content[0]).not.toHaveProperty('thinkingSignature')
+    expect(onDegrade).toHaveBeenCalledWith(expect.stringContaining('not a replayable input item'))
+  })
+
+  it('keeps a Responses reasoning signature that is a typed replayable input item', () => {
+    const onDegrade = vi.fn()
+    const context = toPiContext({
+      provider: 'openai',
+      model: 'gpt-5',
+      messages: [createMessage({
+        role: 'assistant',
+        content: [{ type: 'reasoning', text: 'kept reasoning' }],
+        source: {
+          kind: 'model',
+          ...{
+            provider: 'openai',
+            model: 'gpt-5',
+            replayState: {
+              response: {
+                kind: 'pi-ai', version: 2, api: 'openai-responses', provider: 'openai',
+                model: 'gpt-5', stopReason: 'stop',
+              },
+              blocks: [{ type: 'reasoning', thinkingSignature: '{"type":"reasoning","id":"rs_1","summary":[]}' }],
+            },
+          },
+        },
+      })],
+    }, undefined, onDegrade)
+    expect((context.messages[0] as AssistantMessage).content[0]).toMatchObject({
+      type: 'thinking',
+      thinking: 'kept reasoning',
+      thinkingSignature: '{"type":"reasoning","id":"rs_1","summary":[]}',
+    })
+    expect(onDegrade).not.toHaveBeenCalled()
   })
 
   it('degrades unsupported replay-state versions to provider-neutral history', () => {
