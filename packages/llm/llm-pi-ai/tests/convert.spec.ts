@@ -956,6 +956,68 @@ describe('mapStopReason / mapUsage', () => {
       .toMatchObject({ kind: 'error', failure: { code: 'TRANSPORT' } })
   })
 
+  it.each([
+    // Observed in practice: pi-ai reports a mid-stream read failure as this bare
+    // code, and its own transient list does not cover it.
+    'stream_read_error',
+    'ResourceExhausted',
+    'resourceexhausted',
+    'overloaded',
+    'OVERLOADED',
+    // Providers sometimes pad the code with whitespace.
+    '  stream_read_error  ',
+  ])('maps the bare transport identifier %j to TRANSPORT so it is retryable', (errorMessage) => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+      .toMatchObject({ kind: 'error', failure: { code: 'TRANSPORT' } })
+  })
+
+  it.each([
+    // Prose forms, matching how providers actually word these failures.
+    'The service is temporarily unavailable: overloaded',
+    'upstream server error',
+    'internal error while reading response',
+    'pending stream has been canceled',
+    'Unable to forward upstream',
+    'Provider returned error',
+  ])('maps the transient upstream wording %j to TRANSPORT', (errorMessage) => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+      .toMatchObject({ kind: 'error', failure: { code: 'TRANSPORT' } })
+  })
+
+  it('keeps a terminal auth verdict inside a transient wrapper', () => {
+    expect(mapStopReason(assistant({
+      stopReason: 'error',
+      errorMessage: 'Provider returned error: HTTP 401 unauthorized',
+    }))).toMatchObject({ kind: 'error', failure: { code: 'AUTH' } })
+  })
+
+  it.each([
+    // A deterministic body rejection wrapped in transient wording must stay a
+    // rejection; retrying it can only repeat the same failure.
+    'Provider returned error: HTTP 400 invalid request',
+    'Provider returned error: 400 validation errors',
+    'server error: 400 invalid request',
+    'Provider returned error: HTTP 413 payload too large',
+  ])('keeps a deterministic body rejection wrapped in transient wording: %j', (errorMessage) => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+      .toMatchObject({ kind: 'error', failure: { code: 'INVALID_REQUEST' } })
+  })
+
+  it('leaves an unrecognized bare code non-retryable and keeps its text', () => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: 'some_future_gateway_code' })))
+      .toEqual({
+        kind: 'error',
+        failure: { message: 'some_future_gateway_code', code: 'PI_AI_ERROR' },
+      })
+  })
+
+  it('does not reclassify a sentence that merely mentions a transport code', () => {
+    expect(mapStopReason(assistant({
+      stopReason: 'error',
+      errorMessage: 'upstream rejected the request: stream_read_error is not applicable here',
+    }))).toMatchObject({ kind: 'error', failure: { code: 'PI_AI_ERROR' } })
+  })
+
   it('uses pi-ai provider-specific overflow classification without losing rate-limit exclusions', () => {
     expect(mapStopReason(assistant({
       stopReason: 'error',

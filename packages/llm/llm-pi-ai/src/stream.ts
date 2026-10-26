@@ -39,14 +39,50 @@ export function mapUsage(usage: PiUsage): TokenUsage {
 // wrapper a bare `terminated`, so we are left pattern-matching terse words here.
 // If pi-ai ever forwards the original Error (or a fetch/dispatcher hook that lets
 // us capture the cause ourselves), classify on `code`/`cause` instead of text.
+/**
+ * Bare error identifiers a provider or SDK reports with no surrounding wording,
+ * keyed lowercased so a provider's casing cannot change the verdict. Matched
+ * whole (after trimming) so a sentence that merely mentions one cannot
+ * reclassify; prose wordings are handled by {@link TRANSIENT_PHRASES} instead.
+ *
+ * `stream_read_error` is the pi-ai transport termination observed in practice
+ * (95 occurrences across 79 sessions) and is absent from pi-ai's own transient
+ * list, so that list cannot cover it.
+ */
+const TRANSPORT_ERROR_CODES: ReadonlySet<string> = new Set([
+  'stream_read_error',
+  'resourceexhausted',
+  'overloaded',
+])
+
+/**
+ * Prose wordings for the transient upstream failures providers actually emit.
+ *
+ * Deliberately not the whole of pi-ai's transient list: that list covers ~40
+ * patterns and adding them wholesale would widen the surface for reclassifying
+ * a deterministic failure. These are the high-level wrappers seen around
+ * transport faults; anything outside them stays `PI_AI_ERROR`.
+ */
+const TRANSIENT_PHRASES: readonly RegExp[] = [
+  /overloaded/i,
+  /server.?error/i,
+  /internal.?error/i,
+  /pending stream has been canceled/i,
+  /unable to forward upstream/i,
+  /provider.?returned.?(?:an.?)?error/i,
+]
+
 function classifyPiAiError(message: string): string {
+  if (TRANSPORT_ERROR_CODES.has(message.trim().toLowerCase())) return 'TRANSPORT'
+  // Terminal verdicts outrank a transient wrapper: a gateway relaying a 401 or a
+  // deterministic body rejection inside "provider returned error" is still that
+  // verdict, and retrying it can only repeat the failure.
   if (/\b(?:401|403)\b/.test(message)) return 'AUTH'
   if (isQuotaExceededError(message)) return QUOTA_EXCEEDED_CODE
   if (/\b429\b|rate.?limit/i.test(message)) return 'RATE_LIMIT'
-  // A rejected request body (gateway or provider size cap): resending the
-  // same request cannot succeed, so it is invalid, not transient.
   if (/\b413\b|failed to buffer the request body:\s*length limit exceeded|payload too large|request body too large/i.test(message)) return 'INVALID_REQUEST'
   if (/\b400\b|invalid.?request/i.test(message)) return 'INVALID_REQUEST'
+  if (TRANSIENT_PHRASES.some(pattern => pattern.test(message))) return 'TRANSPORT'
   if (/\b5\d\d\b/.test(message)) return 'SERVER'
   if (/\btime(?:d)?\s*out\b|timeout/i.test(message)) return 'TIMEOUT'
   // A stream truncated before the provider's terminal event: each pi-ai provider
